@@ -1,4 +1,6 @@
-<?php namespace October\Rain\Auth\Exception;
+<?php
+
+namespace October\Rain\Auth\Exception;
 
 use October\Rain\Auth\AuthException;
 
