@@ -1,9 +1,16 @@
-<?php namespace October\Rain\Auth;
+<?php
+
+namespace October\Rain\Auth;
 
 use Cookie;
-use Session;
-use Request;
 use Illuminate\Contracts\Auth\Authenticatable;
+use October\Rain\Auth\Exception\AttributeRequiredException;
+use October\Rain\Auth\Exception\CredentialsNotFoundException;
+use October\Rain\Auth\Exception\HashNotMatchedException;
+use October\Rain\Auth\Exception\InactiveUserException;
+use October\Rain\Auth\Exception\PasswordRequiredException;
+use Request;
+use Session;
 
 /**
  * Authentication manager
@@ -86,7 +93,7 @@ class Manager implements \Illuminate\Contracts\Auth\StatefulGuard
      */
     public function createUserModel()
     {
-        $class = '\\'.ltrim($this->userModel, '\\');
+        $class = '\\' . ltrim($this->userModel, '\\');
         return new $class();
     }
 
@@ -106,7 +113,9 @@ class Manager implements \Illuminate\Contracts\Auth\StatefulGuard
 
     /**
      * Extend the query used for finding the user.
+     *
      * @param \October\Rain\Database\Builder $query
+     *
      * @return void
      */
     public function extendUserQuery($query)
@@ -120,6 +129,7 @@ class Manager implements \Illuminate\Contracts\Auth\StatefulGuard
      * @param array $credentials
      * @param bool $activate
      * @param bool $autoLogin
+     *
      * @return Models\User
      */
     public function register(array $credentials, $activate = false, $autoLogin = true)
@@ -169,6 +179,7 @@ class Manager implements \Illuminate\Contracts\Auth\StatefulGuard
      * Finds a user by the login value.
      *
      * @param string $id
+     *
      * @return mixed (Models\User || null)
      */
     public function findUserById($id)
@@ -184,6 +195,7 @@ class Manager implements \Illuminate\Contracts\Auth\StatefulGuard
      * Finds a user by the login value.
      *
      * @param string $login
+     *
      * @return mixed (Models\User || null)
      */
     public function findUserByLogin($login)
@@ -201,8 +213,9 @@ class Manager implements \Illuminate\Contracts\Auth\StatefulGuard
      * Finds a user by the given credentials.
      *
      * @param array $credentials The credentials to find a user by
-     * @throws AuthException If the credentials are invalid
+     *
      * @return Models\User The requested user
+     * @throws AuthException If the credentials are invalid
      */
     public function findUserByCredentials(array $credentials)
     {
@@ -210,7 +223,7 @@ class Manager implements \Illuminate\Contracts\Auth\StatefulGuard
         $loginName = $model->getLoginName();
 
         if (!array_key_exists($loginName, $credentials)) {
-            throw new AuthException(sprintf('Login attribute "%s" was not provided.', $loginName));
+            throw new AttributeRequiredException(sprintf('Login attribute "%s" was not provided.', $loginName));
         }
 
         $query = $this->createUserModelQuery();
@@ -224,15 +237,14 @@ class Manager implements \Illuminate\Contracts\Auth\StatefulGuard
             // All excepted the hashed attributes
             if (in_array($credential, $hashableAttributes)) {
                 $hashedCredentials = array_merge($hashedCredentials, [$credential => $value]);
-            }
-            else {
+            } else {
                 $query = $query->where($credential, '=', $value);
             }
         }
 
         $user = $query->first();
         if (!$this->validateUserModel($user)) {
-            throw new AuthException('A user was not found with the given credentials.');
+            throw new CredentialsNotFoundException('A user was not found with the given credentials.');
         }
 
         /*
@@ -241,15 +253,17 @@ class Manager implements \Illuminate\Contracts\Auth\StatefulGuard
         foreach ($hashedCredentials as $credential => $value) {
             if (!$user->checkHashValue($credential, $value)) {
                 // Incorrect password
-                if ($credential == 'password') {
-                    throw new AuthException(sprintf(
-                        'A user was found to match all plain text credentials however hashed credential "%s" did not match.',
-                        $credential
-                    ));
+                if ($credential === 'password') {
+                    throw new HashNotMatchedException(
+                        sprintf(
+                            'A user was found to match all plain text credentials however hashed credential "%s" did not match.',
+                            $credential
+                        )
+                    );
                 }
 
                 // User not found
-                throw new AuthException('A user was not found with the given credentials.');
+                throw new CredentialsNotFoundException('A user was not found with the given credentials.');
             }
         }
 
@@ -260,6 +274,7 @@ class Manager implements \Illuminate\Contracts\Auth\StatefulGuard
      * Perform additional checks on the user model.
      *
      * @param $user
+     *
      * @return boolean
      */
     protected function validateUserModel($user)
@@ -278,7 +293,7 @@ class Manager implements \Illuminate\Contracts\Auth\StatefulGuard
      */
     public function createThrottleModel()
     {
-        $class = '\\'.ltrim($this->throttleModel, '\\');
+        $class = '\\' . ltrim($this->throttleModel, '\\');
         return new $class();
     }
 
@@ -287,13 +302,14 @@ class Manager implements \Illuminate\Contracts\Auth\StatefulGuard
      *
      * @param string $loginName
      * @param string $ipAddress
+     *
      * @return Models\Throttle
      */
     public function findThrottleByLogin($loginName, $ipAddress)
     {
         $user = $this->findUserByLogin($loginName);
         if (!$user) {
-            throw new AuthException("A user was not found with the given credentials.");
+            throw new CredentialsNotFoundException("A user was not found with the given credentials.");
         }
 
         $userId = $user->getKey();
@@ -305,11 +321,12 @@ class Manager implements \Illuminate\Contracts\Auth\StatefulGuard
      *
      * @param integer $userId
      * @param string $ipAddress
+     *
      * @return Models\Throttle
      */
     public function findThrottleByUserId($userId, $ipAddress = null)
     {
-        $cacheKey = md5($userId.$ipAddress);
+        $cacheKey = md5($userId . $ipAddress);
         if (isset($this->throttle[$cacheKey])) {
             return $this->throttle[$cacheKey];
         }
@@ -318,10 +335,12 @@ class Manager implements \Illuminate\Contracts\Auth\StatefulGuard
         $query = $model->where('user_id', '=', $userId);
 
         if ($ipAddress) {
-            $query->where(function ($query) use ($ipAddress) {
-                $query->where('ip_address', '=', $ipAddress);
-                $query->orWhere('ip_address', '=', null);
-            });
+            $query->where(
+                function ($query) use ($ipAddress) {
+                    $query->where('ip_address', '=', $ipAddress);
+                    $query->orWhere('ip_address', '=', null);
+                }
+            );
         }
 
         if (!$throttle = $query->first()) {
@@ -346,8 +365,9 @@ class Manager implements \Illuminate\Contracts\Auth\StatefulGuard
      *
      * @param array $credentials The user login details
      * @param bool $remember Store a non-expire cookie for the user
-     * @throws AuthException If authentication fails
+     *
      * @return Models\User The successfully logged in user
+     * @throws AuthException If authentication fails
      */
     public function attempt(array $credentials = [], $remember = false)
     {
@@ -357,7 +377,8 @@ class Manager implements \Illuminate\Contracts\Auth\StatefulGuard
     /**
      * Validate a user's credentials.
      *
-     * @param  array  $credentials
+     * @param array $credentials
+     *
      * @return bool
      */
     public function validate(array $credentials = [])
@@ -368,8 +389,13 @@ class Manager implements \Illuminate\Contracts\Auth\StatefulGuard
     /**
      * Validate a user's credentials, method used internally.
      *
-     * @param  array  $credentials
+     * @param array $credentials
+     *
      * @return User
+     * @throws AttributeRequiredException
+     * @throws AuthException
+     * @throws CredentialsNotFoundException
+     * @throws PasswordRequiredException
      */
     protected function validateInternal(array $credentials = [])
     {
@@ -380,11 +406,11 @@ class Manager implements \Illuminate\Contracts\Auth\StatefulGuard
         $loginCredentialKey = isset($credentials[$loginName]) ? $loginName : 'login';
 
         if (empty($credentials[$loginCredentialKey])) {
-            throw new AuthException(sprintf('The "%s" attribute is required.', $loginCredentialKey));
+            throw new AttributeRequiredException(sprintf('The "%s" attribute is required.', $loginCredentialKey));
         }
 
         if (empty($credentials['password'])) {
-            throw new AuthException('The password attribute is required.');
+            throw new PasswordRequiredException('The password attribute is required.');
         }
 
         /*
@@ -409,8 +435,7 @@ class Manager implements \Illuminate\Contracts\Auth\StatefulGuard
          */
         try {
             $user = $this->findUserByCredentials($credentials);
-        }
-        catch (AuthException $ex) {
+        } catch (AuthException $ex) {
             if ($this->useThrottle) {
                 $throttle->addLoginAttempt();
             }
@@ -455,8 +480,7 @@ class Manager implements \Illuminate\Contracts\Auth\StatefulGuard
              */
             if ($sessionArray = Session::get($this->sessionKey)) {
                 $userArray = $sessionArray;
-            }
-            elseif ($cookieArray = Cookie::get($this->sessionKey)) {
+            } elseif ($cookieArray = Cookie::get($this->sessionKey)) {
                 $this->viaRemember = true;
                 /*
                  * Shift gracefully to unserialized cookies
@@ -464,12 +488,10 @@ class Manager implements \Illuminate\Contracts\Auth\StatefulGuard
                  */
                 if (is_array($cookieArray)) {
                     $userArray = $cookieArray;
-                }
-                else {
+                } else {
                     $userArray = @json_decode($cookieArray, true);
                 }
-            }
-            else {
+            } else {
                 return false;
             }
 
@@ -561,7 +583,8 @@ class Manager implements \Illuminate\Contracts\Auth\StatefulGuard
     /**
      * Log a user into the application without sessions or cookies.
      *
-     * @param  array  $credentials
+     * @param array $credentials
+     *
      * @return bool
      */
     public function once(array $credentials = [])
@@ -578,7 +601,8 @@ class Manager implements \Illuminate\Contracts\Auth\StatefulGuard
     /**
      * Log the given user ID into the application without sessions or cookies.
      *
-     * @param  mixed  $id
+     * @param mixed $id
+     *
      * @return \Illuminate\Contracts\Auth\Authenticatable|false
      */
     public function onceUsingId($id)
@@ -595,7 +619,11 @@ class Manager implements \Illuminate\Contracts\Auth\StatefulGuard
     /**
      * Logs in the given user and sets properties
      * in the session.
-     * @throws AuthException If the user is not activated and $this->requireActivation = true
+     *
+     * @param Authenticatable $user
+     * @param bool $remember
+     *
+     * @throws InactiveUserException
      */
     public function login(Authenticatable $user, $remember = true)
     {
@@ -609,10 +637,12 @@ class Manager implements \Illuminate\Contracts\Auth\StatefulGuard
          */
         if ($this->requireActivation && !$user->is_activated) {
             $login = $user->getLogin();
-            throw new AuthException(sprintf(
-                'Cannot login user "%s" as they are not activated.',
-                $login
-            ));
+            throw new InactiveUserException(
+                sprintf(
+                    'Cannot login user "%s" as they are not activated.',
+                    $login
+                )
+            );
         }
 
         $this->user = $user;
@@ -638,8 +668,9 @@ class Manager implements \Illuminate\Contracts\Auth\StatefulGuard
     /**
      * Log the given user ID into the application.
      *
-     * @param  mixed  $id
-     * @param  bool   $remember
+     * @param mixed $id
+     * @param bool $remember
+     *
      * @return \Illuminate\Contracts\Auth\Authenticatable
      */
     public function loginUsingId($id, $remember = false)
@@ -719,7 +750,7 @@ class Manager implements \Illuminate\Contracts\Auth\StatefulGuard
         $this->login($user, false);
 
         if (!$this->isImpersonator()) {
-            Session::put($this->sessionKey.'_impersonate', $oldSession);
+            Session::put($this->sessionKey . '_impersonate', $oldSession);
         }
     }
 
@@ -731,7 +762,7 @@ class Manager implements \Illuminate\Contracts\Auth\StatefulGuard
     {
         $currentSession = Session::get($this->sessionKey);
         $currentUser = !empty($currentSession[0]) ? $this->findUserById($currentSession[0]) : false;
-        $oldSession = Session::pull($this->sessionKey.'_impersonate');
+        $oldSession = Session::pull($this->sessionKey . '_impersonate');
         $oldUser = !empty($oldSession[0]) ? $this->findUserById($oldSession[0]) : false;
 
         if ($currentUser) {
@@ -759,7 +790,7 @@ class Manager implements \Illuminate\Contracts\Auth\StatefulGuard
      */
     public function isImpersonator()
     {
-        return !empty(Session::has($this->sessionKey.'_impersonate'));
+        return !empty(Session::has($this->sessionKey . '_impersonate'));
     }
 
     /**
@@ -769,7 +800,7 @@ class Manager implements \Illuminate\Contracts\Auth\StatefulGuard
      */
     public function getImpersonator()
     {
-        $impersonateArray = Session::get($this->sessionKey.'_impersonate');
+        $impersonateArray = Session::get($this->sessionKey . '_impersonate');
 
         /*
          * Check supplied session/cookie is an array (user id, persist code)
